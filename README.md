@@ -18,6 +18,51 @@ To run the latest version, you can add your key and change the prompt in `config
 
 Some experiments are shown in `examples/` using an older version of MegaAgent. You can use the same prompt while substituting other files with the latest version.
 
+## Contributor Guide
+
+New contributors should start with [AGENTS.md](AGENTS.md), which documents project layout, commands for running/testing, coding conventions, and review expectations.
+
+## Testing
+
+This project uses **pytest** for unit and integration testing. The test suite is located in the `tests/` directory.
+
+### Running Tests
+
+To run all tests:
+```bash
+uv run pytest tests/
+```
+
+To run tests with verbose output:
+```bash
+uv run pytest tests/ -v
+```
+
+To run tests with coverage report:
+```bash
+uv run pytest tests/ --cov=. --cov-report=html:htmlcov --cov-report=term-missing
+```
+
+To run specific test module:
+```bash
+uv run pytest tests/test_llm.py -v
+```
+
+To run specific test class or function:
+```bash
+uv run pytest tests/test_llm.py::TestWebSearchTool -v
+uv run pytest tests/test_llm.py::TestWebSearchTool::test_web_search_function_success -v
+```
+
+### Test Coverage
+
+The test suite includes 22+ tests covering:
+- **LLM Module**: Web search tool functionality, token counting, response handling
+- **Agent Module**: Agent initialization, memory management, task status tracking
+- **Utils Module**: File operations, Git operations, subprocess execution
+
+Run tests with coverage reporting to ensure 80%+ code coverage.
+
 ## Experimental Results
 
 ### RQ1: Quantitative experiments using gpt-4o as backbone

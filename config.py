@@ -1,6 +1,22 @@
-api_key = 'sk-your_api_key_here'
-model = "gpt-4.1"
+import os
+
+# API configuration - reads from environment variable for security
+# In production, set OPENAI_API_KEY environment variable
+# Override: api_key = 'sk-your_api_key_here' for testing only
+api_key = os.getenv('OPENAI_API_KEY', 'sk-your_api_key_here')
+
+# Model configuration - defaults to GPT-5.1
+# Override by setting MODEL environment variable or modifying this value
+# Supported models: gpt-5.1, gpt-5, gpt-4, gpt-4-turbo, etc.
+model = os.getenv('MODEL', 'gpt-5.1')
+
 url = 'https://api.openai.com/v1/chat/completions'
+
+# Web search configuration - uses OpenAI GPT-5 web search tool
+# Set ENABLE_WEB_SEARCH=true to enable web search in agent prompts
+# Set WEB_SEARCH_PROVIDER to choose provider (openai, bing, google, serper)
+enable_web_search = os.getenv('ENABLE_WEB_SEARCH', 'false').lower() == 'true'
+web_search_provider = os.getenv('WEB_SEARCH_PROVIDER', 'openai')
 
 MAX_MEMORY = 10
 MAX_ROUNDS = 20
