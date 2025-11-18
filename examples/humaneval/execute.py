@@ -13,17 +13,17 @@ questions = [
     for _ in range(num_samples_per_task)
 ]
 
-# File paths
+# 文件路径
 config_file_path = 'config.py'
 main_script_path = 'main.py'
 output_folder = './'
 plan_folder = 'files/ans.json'
 
-# Read config.py file
+# 读取 config.py 文件
 with open(config_file_path, 'r', encoding='utf-8') as file:
     config_content = file.read()
 
-# Function to update additional_prompt
+# 修改 additional_prompt 的函数
 def update_additional_prompt(config_content, task_id, question):
     question = question.replace("'''", '"""')
     new_prompt = '''
@@ -56,7 +56,7 @@ Leave a remarkable TODO wherever there is an unfinished task. Please keep updati
     )
     return updated_content
 
-# Process each row
+# 针对每一行进行处理
 for index, question in enumerate(questions):
     # Check if plan{index}.json already exists
     # output_plan_path = os.path.join(output_folder, f'plan{index}.json')
@@ -64,19 +64,19 @@ for index, question in enumerate(questions):
     #     print(f"plan{index}.json already exists, skipping...")
     #     continue
 
-    # Update config.py file
+    # 修改 config.py 文件
     updated_config_content = update_additional_prompt(config_content, question['task_id'], question['prompt'])
-
-    # Temporarily save the updated config.py
+    
+    # 临时保存更新后的 config.py
     temp_config_path = f'config.py'
     with open(temp_config_path, 'w', encoding='utf-8') as file:
         file.write(updated_config_content)
-
-    # Run main.py
+    
+    # 运行 main.py
     try:
         subprocess.run(["python", main_script_path], check=True)
-
-        # Copy generated plan.json to target file
+        
+        # 复制生成的 plan.json 到目标文件
         if os.path.exists(plan_folder):
             # with open
             output_plan_path = os.path.join(output_folder, f'plan{index}.json')

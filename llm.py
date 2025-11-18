@@ -49,29 +49,6 @@ def gen_tools(agent_name):
                     }
                 }
         },
-    ]
-    # Conditionally add web search tool if enabled
-    if config.enable_web_search:
-        tools.append({
-                "name": "web_search",
-                "description": "Search the web for information using OpenAI GPT-5 web search. Returns recent web search results with source citations.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "query": {
-                            "type": "string",
-                            "description": "The search query to find information on the web."
-                        },
-                        "max_results": {
-                            "type": "integer",
-                            "description": "Maximum number of results to return. Default is 5."
-                        }
-                    }
-                },
-                "required": ["query"]
-        })
-    # Add remaining tools
-    tools.extend([
         {
                 "name": "read_file",
                 "description": f"Read the content of a file. Return file content and file hash. To modify a file, please first read it, then write it(using the same hash).\nYou have created these files:{wf}\nYou can also read any files created by other agents.",
@@ -186,7 +163,7 @@ def gen_tools(agent_name):
                 "name": "terminate",
                 "description": "End your current conversation. Please ensure all your tasks in your TODO list have been done and cleared.",
         }
-    ])
+    ]
 
 
 def _get_llm_response(messages, enable_tools=True, agent_name=''):
@@ -228,80 +205,4 @@ def get_llm_response(messages, enable_tools=True, agent_name=''):
     output_token+=response['usage']['completion_tokens']
     logging.info(f"Input token: {input_token}, Output token: {output_token}")
     return response
-
-def web_search(query, max_results=5):
-    """
-    Perform a web search using OpenAI GPT-5 web search tool.
-
-    Args:
-        query: The search query string
-        max_results: Maximum number of results to return (default: 5)
-
-    Returns:
-        Dictionary with search results and metadata
-    """
-    if not config.enable_web_search:
-        return {'error': 'Web search is not enabled. Set ENABLE_WEB_SEARCH=true'}
-
-    try:
-        api_key = config.api_key
-        url = config.url
-        headers = {
-            'Content-Type': 'application/json',
-            'Authorization': f'Bearer {api_key}'
-        }
-
-        # Create a message requesting web search
-        messages = [
-            {
-                'role': 'user',
-                'content': f'Search the web for: {query}'
-            }
-        ]
-
-        body = {
-            'model': config.model,
-            'messages': messages,
-            'functions': [
-                {
-                    'name': 'web_search',
-                    'description': 'Search the web for information',
-                    'parameters': {
-                        'type': 'object',
-                        'properties': {
-                            'query': {
-                                'type': 'string',
-                                'description': 'The search query'
-                            }
-                        },
-                        'required': ['query']
-                    }
-                }
-            ],
-            'temperature': 0
-        }
-
-        response = requests.post(url, headers=headers, json=body, timeout=30)
-
-        if response.status_code == 200:
-            result = response.json()
-            logging.info(f"Web search completed for query: {query}")
-            return {
-                'status': 'success',
-                'query': query,
-                'results': result.get('choices', []),
-                'max_results': max_results
-            }
-        else:
-            error_msg = f"Web search failed with status {response.status_code}: {response.text}"
-            logging.error(error_msg)
-            return {'error': error_msg}
-
-    except requests.exceptions.Timeout:
-        error_msg = "Web search request timed out"
-        logging.error(error_msg)
-        return {'error': error_msg}
-    except Exception as e:
-        error_msg = f"Web search error: {str(e)}"
-        logging.error(error_msg)
-        return {'error': error_msg}
+    

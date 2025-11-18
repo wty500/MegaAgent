@@ -4,7 +4,7 @@ import sys
 import time
 def enqueue_output(out, queue, ready_event):
     while True:
-        char = out.read(1)  # Read one character at a time
+        char = out.read(1)  # 每次读取一个字符
         if char == '':
             break
         queue.append(char)
@@ -17,39 +17,39 @@ def interactive_subprocess(program_path):
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        bufsize=0,  # Unbuffered, real-time output
+        bufsize=0,  # 无缓冲，实时输出
         text=True
     )
-
-    # List for storing output characters
+    
+    # 用来存储输出字符的列表
     output_chars = []
     output_ready = threading.Event()
-
-    # Start a thread to capture output
+    
+    # 启动一个线程来捕获输出
     output_thread = threading.Thread(target=enqueue_output, args=(process.stdout, output_chars, output_ready))
     output_thread.start()
     try:
-        # Perform multi-round interaction
+        # 进行多轮交互
         while True:
             output_ready.wait()
             time.sleep(1)
-            # Display the program output so far
+            # 显示目前为止程序的输出
             sys.stdout.write(''.join(output_chars))
             output_chars.clear()
             sys.stdout.flush()
             output_ready.clear()
 
-            # Get user input
+            # 获取用户的输入
             user_input = input()
             if user_input.lower() == 'exit':
                 break
 
-            # Send input to the program
+            # 向程序发送输入
             process.stdin.write(user_input + '\n')
             process.stdin.flush()
-
+            
     except KeyboardInterrupt:
-        print("Interaction interrupted by user")
+        print("交互被用户中断")
     finally:
         process.stdin.close()
         process.terminate()
@@ -57,4 +57,4 @@ def interactive_subprocess(program_path):
         output_thread.join()
 
 if __name__ == "__main__":
-    interactive_subprocess('files/main.py')  # Replace with the actual path
+    interactive_subprocess('files/main.py')  # 替换为实际的路径
