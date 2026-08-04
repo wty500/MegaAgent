@@ -1,10 +1,22 @@
 import config
-import requests
 import os
+import sys
 import json
 import logging
 import time
-written_files = set()
+
+_REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..'))
+if _REPO_ROOT not in sys.path:
+    sys.path.append(_REPO_ROOT)
+import llm_core
+
+# NOTE: utils.write_file records outputs as written_files[agent_name] = set(...),
+# i.e. it treats this as a dict keyed by agent (same as the root framework). The
+# original example declared it as a set(), so every successful write raised
+# "'set' object does not support item assignment" and returned that string as a
+# fake error. A dict makes the existing bookkeeping work and lets write_file
+# report success correctly.
+written_files = dict()
 tools = []
 
 def gen_tools():
@@ -99,37 +111,48 @@ def gen_tools():
                     "filename",
                     "content"
                 ]
+        },
+        {
+                "name": "add_agent",
+                "description": "If the task is too complex for the current team, recruit a new collaborator to help you. Provide their name, a short description, and a detailed initial prompt. After recruiting, you MUST reach them with <talk goal=\"Name\">...</talk> to assign work. Returns the real (possibly auto-renamed) name.",
+                "parameters": {
+                            "type": "object",
+                    "properties": {
+                        "name": {
+                            "type": "string",
+                            "description": "The name of the agent to be added. One word, no spaces. Do not reuse an existing name."
+                        },
+                        "description": {
+                            "type": "string",
+                            "description": "A short description of the agent, for your reference."
+                        },
+                        "initial_prompt": {
+                            "type": "string",
+                            "description": "The initial prompt for that agent. Specify his name, his job, exactly what files he must write, and all his collaborators' EXACT names and jobs. Keep his work non-divisible, specific and simple."
+                        }
+                    }
+                },
+                "required": [
+                    "name",
+                    "description",
+                    "initial_prompt"
+                ]
         }
     ]
 
 
-def _get_llm_response(messages):
-    api_key = config.api_key
-    url = config.url
-    headers = {'Content-Type': 'application/json',
-            'Authorization':f'Bearer {api_key}'}
+def _get_llm_response(messages, enable_tools=True):
     gen_tools()
-    body = {
-        'model': config.model,
-        "messages": messages,
-        "temperature": 0,
-        # "parameters": {
-        #     "result_format": "message",
-        "functions": tools
-        # }
-    }
-    try:
-        response = requests.post(url, headers=headers, json=body)
-        # print(response.content)
-        return response.json()
-    except Exception as e:
-        return {'error': e}
+    return llm_core.chat_completion(messages, config.model,
+                                    llm_core.wrap_tools(tools) if enable_tools else None,
+                                    api_key=config.api_key, base_url=config.base_url,
+                                    reasoning_effort=getattr(config, 'reasoning_effort', None))
 
-def get_llm_response(messages):
-    response = _get_llm_response(messages)
+def get_llm_response(messages, enable_tools=True):
+    response = _get_llm_response(messages, enable_tools)
     while 'choices' not in response:
         logging.error(response)
-        # time.sleep(3)
-        response = _get_llm_response(messages)
+        time.sleep(1)
+        response = _get_llm_response(messages, enable_tools)
     return response
     
