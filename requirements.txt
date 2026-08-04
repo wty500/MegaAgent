@@ -1,0 +1,7 @@
+openai>=1.100
+httpx
+requests
+chromadb
+pandas
+openpyxl
+chardet

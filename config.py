@@ -1,6 +1,7 @@
 api_key = 'sk-your_api_key_here'
-model = "gpt-4.1"
-url = 'https://api.openai.com/v1/chat/completions'
+model = "gpt-5.6-sol"
+base_url = 'https://api.openai.com/v1'
+reasoning_effort = 'xhigh'
 
 MAX_MEMORY = 10
 MAX_ROUNDS = 20

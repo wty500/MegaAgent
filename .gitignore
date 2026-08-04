@@ -1,1 +1,33 @@
 __pycache__
+*.pyc
+
+# --- benchmark run artifacts (not part of the framework) ---
+# Individual per-row outputs; only the merged submission file is kept.
+examples/travel planner/plan*.json
+!examples/travel planner/merged_plans.jsonl
+
+# Archived / backup submissions and pre-fix snapshots
+examples/travel planner/merged_plans.*.jsonl
+examples/travel planner/pre_transport_fix/
+examples/travel planner/pre_badcase_fix/
+examples/travel planner/old_plans_yunwu/
+
+# Run logs, pids, editor temp files
+examples/travel planner/*.log
+examples/travel planner/*.pid
+examples/travel planner/run_logs/
+*.tmp.*
+log.txt
+logs/
+files/
+
+# --- evaluation harness / internal QC (not framework code) ---
+examples/travel planner/run_parallel.py
+examples/travel planner/check_plans.py
+examples/travel planner/salvage_loop.py
+
+# Partial benchmark outputs from the other examples (not published)
+examples/GSM8k/plan*.json
+examples/MATH/plan*.json
+examples/humaneval/plan*.json
+examples/mbpp/plan*.json
