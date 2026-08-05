@@ -1,5 +1,5 @@
 import config
-import requests
+import llm_core
 import os
 import json
 import logging
@@ -167,42 +167,27 @@ def gen_tools(agent_name):
 
 
 def _get_llm_response(messages, enable_tools=True, agent_name=''):
-    api_key = config.api_key
-    url = config.url
-    headers = {'Content-Type': 'application/json',
-            'Authorization':f'Bearer {api_key}'}
     gen_tools(agent_name)
     if enable_tools:
-        body = {
-            'model': config.model,
-            "messages": messages,
-            "functions": tools,
-            "temperature": 0,
-        }
+        wrapped_tools = llm_core.wrap_tools(tools)
     else:
-        body = {
-            'model': config.model,
-            "messages": messages,
-            "temperature": 0,
-        }
-    try:
-        response = requests.post(url, headers=headers, json=body)
-        # print(response.content)
-        return response.json()
-    except Exception as e:
-        return {'error': e}
+        wrapped_tools = None
+    return llm_core.chat_completion(messages, config.model, wrapped_tools,
+                                    api_key=config.api_key, base_url=config.base_url,
+                                    reasoning_effort=getattr(config, 'reasoning_effort', None))
 
 def get_llm_response(messages, enable_tools=True, agent_name=''):
     response = _get_llm_response(messages, enable_tools, agent_name)
     while 'choices' not in response:
         logging.error(response)
-        # time.sleep(3)
+        time.sleep(1)
         response = _get_llm_response(messages, enable_tools, agent_name)
     # if response['choices'][0]['message']['content']:
     #     logging.info(response['choices'][0]['message']['content'])
     global input_token,output_token
-    input_token+=response['usage']['prompt_tokens']
-    output_token+=response['usage']['completion_tokens']
+    usage = response.get('usage') or {}
+    input_token+=usage.get('prompt_tokens') or 0
+    output_token+=usage.get('completion_tokens') or 0
     logging.info(f"Input token: {input_token}, Output token: {output_token}")
     return response
     

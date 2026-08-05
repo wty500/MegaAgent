@@ -18,7 +18,7 @@ class Memory:
         self.initialize_logger(agent_name)
 
     def add_memory(self, memory):
-        if (memory['role']!='function' and memory['content'] != None):
+        if (memory['role'] not in ('function', 'tool') and memory['content'] != None):
             self.history_pool.add(documents=[memory['content']], ids=[str(time.time())])
         self.logger.info(str(memory))
         self.history.append(memory)
@@ -75,7 +75,9 @@ class Memory:
 
         if self.history and self.history[-1]['content']:
             relevant_history = self.history_pool.query(query_texts=self.history[-1]['content'], n_results=1)
-            if relevant_history:
+            # chroma returns empty result lists on a fresh collection; the
+            # bare [0][0] index would kill this agent's worker thread
+            if relevant_history and relevant_history['documents'] and relevant_history['documents'][0]:
                 init+=f"\n\nHere is a relevant memory: \n{relevant_history['documents'][0][0]}\nBelow is the recent dialogue."
 
         memory = [{"role": "system", "content": init}]
@@ -257,7 +259,7 @@ class Agent(Memory):
                 req = self.get()
                 if llm_output != None:
                     self.logger.info(f"Assistant: {llm_output}")
-                if 'function_call' not in assistant_output:
+                if not assistant_output.get('tool_calls'):
                     self.add_dialogue("user", "Error: No function call found in the response. You must use function calls to work and communicate with other agents. If you have nothing to do now, please call 'terminate' function.")
                     req = self.get()
                     round += 1
@@ -266,21 +268,25 @@ class Agent(Memory):
 
             round = 0
             while round < config.MAX_ROUNDS:
-                tool_call = assistant_output['function_call']
-                tool_name = tool_call['name']
-                arguments = json.loads(tool_call['arguments'])
-                tool_info = self.execute(tool_name, {"role": "function"}, arguments)
-                if tool_info == {}:
+                terminated = False
+                for tool_call in assistant_output.get('tool_calls', []):
+                    tool_name = tool_call['function']['name']
+                    arguments = json.loads(tool_call['function']['arguments'])
+                    tool_info = self.execute(tool_name, {"role": "tool", "tool_call_id": tool_call['id']}, arguments)
+                    if tool_info == {}:
+                        terminated = True
+                        break
+                    self.add_memory(tool_info)
+                    req += [tool_info]
+                if terminated:
                     break
-                self.add_memory(tool_info)
-                req += [tool_info]
                 round += 1
                 response = get_llm_response(req, agent_name=self.name)
                 assistant_output = response['choices'][0]['message']
                 llm_output = assistant_output['content']
                 self.add_memory(assistant_output)
                 req += [assistant_output]
-                while 'function_call' not in assistant_output:
+                while not assistant_output.get('tool_calls'):
                     req += [{"role":"user", "content": "Error: No function call found in the response. You must use function calls to work and communicate with other agents. If you have nothing to do now, please call 'terminate' function."}]
                     response = get_llm_response(req, agent_name=self.name)
                     assistant_output = response['choices'][0]['message']

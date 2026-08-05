@@ -18,6 +18,30 @@ To run the latest version, you can add your key and change the prompt in `config
 
 Some experiments are shown in `examples/` using an older version of MegaAgent. You can use the same prompt while substituting other files with the latest version.
 
+### Backbone / API interface
+
+The main MegaAgent code (`.`) and the TravelPlanner example talk to the model
+through the modern OpenAI Python SDK tool-use interface (`tools` /
+`tool_calls` / `role:"tool"`). The shared transport lives in a single file,
+`llm_core.py`, which their `llm.py` delegates to; all framework logic, prompts,
+and tool schemas are unchanged from the original design. Configure the backbone
+in `config.py`:
+
+```python
+api_key = 'YOUR_KEY'
+model = "gpt-5.6-sol"
+base_url = 'https://your-endpoint/v1'
+reasoning_effort = 'xhigh'   # optional; sent only when set
+```
+
+`llm_core.py` streams every request internally (reassembling one complete
+response), sends no `temperature` and never caps `max_tokens` (so long
+reasoning is never truncated), and sanitizes histories to the strict tool-use
+protocol. Install dependencies with `pip install -r requirements.txt`.
+
+The other examples under `examples/` still use the legacy
+`functions`/`function_call` interface with `url` in their `config.py`.
+
 ## Experimental Results
 
 ### RQ1: Quantitative experiments using gpt-4o as backbone
@@ -42,14 +66,21 @@ Some experiments are shown in `examples/` using an older version of MegaAgent. Y
 
 
 
-We also used GPT-4o to achieve the following results on TravelPlanner. The submission file is included in `examples/travel planner`.
+We also evaluated MegaAgent on TravelPlanner (validation set, sole-planning
+mode). The submission file (`merged_plans.jsonl`) is included in
+`examples/travel planner`.
 
-- Delivery Rate: 100.0%
-- Commonsense Constraint Micro Pass Rate: 81.88%
-- Commonsense Constraint Macro Pass Rate: 27.22%
-- Hard Constraint Micro Pass Rate: 40.48%
-- Hard Constraint Macro Pass Rate: 23.89%
-- Final Pass Rate: 10.0%
+| Metric | GPT-4o | GPT-5.6 |
+| ------ | ------ | ------- |
+| Delivery Rate | 100.0% | 100.0% |
+| Commonsense Constraint Micro Pass Rate | 81.88% | 97.64% |
+| Commonsense Constraint Macro Pass Rate | 27.22% | 84.44% |
+| Hard Constraint Micro Pass Rate | 40.48% | 87.14% |
+| Hard Constraint Macro Pass Rate | 23.89% | 83.33% |
+| **Final Pass Rate** | **10.0%** | **76.67%** |
+
+The GPT-5.6 column uses `gpt-5.6-sol` with `reasoning_effort=xhigh` through the
+tool-use interface described above.
 
 
 ## Licenses

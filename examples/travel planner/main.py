@@ -39,6 +39,10 @@ begin_time = time.time()
 chroma_client = chromadb.Client()
 
 employee_dict = {}
+# Runtime recruitment (add_agent) support: serialize employee_dict mutation and
+# cap total headcount to prevent runaway recruitment.
+recruit_lock = threading.Lock()
+MAX_EMPLOYEES = 15
 employee_dict[config.ceo_name] = {
     'memory': [{"role": "user", "content": config.initial_prompt}],
     'lock': threading.Lock(),
@@ -46,7 +50,11 @@ employee_dict[config.ceo_name] = {
     'history': chroma_client.create_collection(name=config.ceo_name)
 }
 
-llm_output = get_llm_response(employee_dict[config.ceo_name]['memory'])['choices'][0]['message']['content']
+# The roster call must yield <employee> text, so tools are disabled here —
+# same as the root engine's project-launch call. With tools offered, the
+# model tends to call add_agent instead of writing the roster, and this
+# engine's launch phase only parses text.
+llm_output = get_llm_response(employee_dict[config.ceo_name]['memory'], False)['choices'][0]['message']['content']
 logging.info(f"{config.ceo_name}:\n{llm_output}")
 
 employee_dict[config.ceo_name]['memory'].append({"role": "assistant", "content": llm_output})
@@ -95,7 +103,12 @@ def add_memory(employee_name, output):
             todo_list = f'Your TODO list:\n{todo_list}\nYou can change it in todo_{employee_name}.txt, by providing its current hash:{commit_hash}(will change if you edit TODO list)\n'
         if employee['memory'][-1]['content'] != None:
             relevant_history = employee['history'].query(query_texts=[employee['memory'][-1]['content']], n_results=1)
-            summary = f"Here are some relevant chat history:\n{relevant_history['documents'][0][0]}\nBelow is the most recent chat history:\n"
+            # chroma returns empty result lists on a fresh collection; the
+            # bare [0][0] index would kill this employee's worker thread
+            if relevant_history['documents'] and relevant_history['documents'][0]:
+                summary = f"Here are some relevant chat history:\n{relevant_history['documents'][0][0]}\nBelow is the most recent chat history:\n"
+            else:
+                summary = "Here is the most recent chat history:\n"
         else:
             summary = "Here is the most recent chat history:\n"
         for memory in employee['memory']:
@@ -125,68 +138,89 @@ def work(employee_name, callback=None):
         logging.info(f"{employee_name}:\n{assistant_output['content']}")
     result = package = None
     rounds = 0
-    while 'function_call' in assistant_output and rounds < config.MAX_ROUNDS:
+    while assistant_output.get('tool_calls') and rounds < config.MAX_ROUNDS:
         rounds += 1
-        tool_call = assistant_output['function_call']
-        tool_name = tool_call['name']
-        tool_info = {"role": "function"}
-        
-        try:
-            arguments = json.loads(tool_call['arguments'])
-            
-            if tool_name == 'exec_python_file':
-                tool_info['name'] = 'exec_python_file'
-                filename = arguments['filename']
-                try:
-                    result, package = start_interactive_subprocess(filename)
-                except Exception as e:
-                    result = f"Error: {e}"
-                # result = exec_python_file(filename)
-                tool_info['content'] = str(result)
-                result = f"{filename}\n---Result---\n{result}"
-            elif tool_name == 'input':
-                tool_info['name'] = 'input'
-                content = arguments['content']
-                if package:
+        for tool_call in assistant_output['tool_calls']:
+            tool_name = tool_call['function']['name']
+            tool_info = {"role": "tool", "tool_call_id": tool_call['id']}
+
+            try:
+                arguments = json.loads(tool_call['function']['arguments'])
+
+                if tool_name == 'exec_python_file':
+                    tool_info['name'] = 'exec_python_file'
+                    filename = arguments['filename']
                     try:
-                        result, package = send_input(content,package)
+                        result, package = start_interactive_subprocess(filename)
                     except Exception as e:
                         result = f"Error: {e}"
+                    # result = exec_python_file(filename)
+                    tool_info['content'] = str(result)
+                    result = f"{filename}\n---Result---\n{result}"
+                elif tool_name == 'input':
+                    tool_info['name'] = 'input'
+                    content = arguments['content']
+                    if package:
+                        try:
+                            result, package = send_input(content,package)
+                        except Exception as e:
+                            result = f"Error: {e}"
+                    else:
+                        result = "Error: No process to input."
+                    tool_info['content'] = str(result)
+                    result = f"Input:\n{content}\n---Result---\n{result}"
+                elif tool_name == 'read_file':
+                    tool_info['name'] = 'read_file'
+                    filename = arguments['filename']
+                    content, hashvalue = read_file(filename)
+                    result = f"{filename}\n---Content---\n{content}\n---base_commit_hash---\n{hashvalue}"
+                    tool_info['content'] = result
+                elif tool_name == 'write_file':
+                    tool_info['name'] = 'write_file'
+                    filename = arguments['filename']
+                    content = arguments['content']
+                    if 'overwrite' in arguments:
+                        overwrite = arguments['overwrite']
+                        base_commit_hash = arguments['base_commit_hash'] if 'base_commit_hash' in arguments else None
+                        result = write_file(filename, content, overwrite, base_commit_hash)
+                    else:
+                        result = write_file(filename, content)
+                    tool_info['content'] = result
+                    result = f"{filename}\n---Content---\n{content}\n---Result---\n{result}"
+                elif tool_name == 'add_agent':
+                    tool_info['name'] = 'add_agent'
+                    with recruit_lock:
+                        if len(employee_dict) > MAX_EMPLOYEES:
+                            result = f"Error: the team already has {MAX_EMPLOYEES} members. No more agents can be recruited."
+                        else:
+                            new_name = arguments['name']
+                            note = ''
+                            if new_name in employee_dict:
+                                new_name = new_name + '_' + str(time.time())[-5:]
+                                note = f"Warning: {arguments['name']} already exists. Automatically renamed to {new_name}.\n"
+                            new_prompt = f"{arguments['initial_prompt']}\n{config.additional_prompt}\nYour supervisor is: {employee_name}"
+                            employee_dict[new_name] = {
+                                'initial_prompt': new_prompt,
+                                'memory': [{"role": "system", "content": f"{new_prompt}\nYou can write your TODO list in todo_{new_name}.txt. \n"}],
+                                'lock': threading.Lock(),
+                                'pending': False,
+                                'history': chroma_client.create_collection(name=new_name)
+                            }
+                            result = f"{note}Success. {new_name} has been recruited. You MUST now talk to {new_name} with <talk goal=\"{new_name}\">...</talk> to assign work."
+                    tool_info['content'] = result
                 else:
-                    result = "Error: No process to input."
-                tool_info['content'] = str(result)
-                result = f"Input:\n{content}\n---Result---\n{result}"
-            elif tool_name == 'read_file':
-                tool_info['name'] = 'read_file'
-                filename = arguments['filename']
-                content, hashvalue = read_file(filename)
-                result = f"{filename}\n---Content---\n{content}\n---base_commit_hash---\n{hashvalue}"
-                tool_info['content'] = result
-            elif tool_name == 'write_file':
-                tool_info['name'] = 'write_file'
-                filename = arguments['filename']
-                content = arguments['content']
-                if 'overwrite' in arguments:
-                    overwrite = arguments['overwrite']
-                    base_commit_hash = arguments['base_commit_hash'] if 'base_commit_hash' in arguments else None
-                    result = write_file(filename, content, overwrite, base_commit_hash)
-                else:
-                    result = write_file(filename, content)
-                tool_info['content'] = result
-                result = f"{filename}\n---Content---\n{content}\n---Result---\n{result}"
-            else:
-                raise ValueError(f"Error: {tool_name} is not a valid function name")
-            employee['memory'].append(tool_info)
-        except ValueError as e:
-            employee['memory'] = employee['memory'][:-1]
-            employee['memory'].append({"role": "user", "content": str(e)})
-        except Exception as e:
-            logging.error(e)
-            employee['memory'].append({"role": "user", "content": str(e)})
-        
-        # too much token cost, but deduct file IO. Use for your own need
-        # llm_output += f"\n{tool_name}:\n{result}"
-    
+                    raise ValueError(f"Error: {tool_name} is not a valid function name")
+                employee['memory'].append(tool_info)
+            except ValueError as e:
+                employee['memory'] = employee['memory'][:-1]
+                employee['memory'].append({"role": "user", "content": str(e)})
+            except Exception as e:
+                logging.error(e)
+                employee['memory'].append({"role": "user", "content": str(e)})
+
+            # too much token cost, but deduct file IO. Use for your own need
+            # llm_output += f"\n{tool_name}:\n{result}"
+
         response = get_llm_response(employee['memory'])
         assistant_output = response['choices'][0]['message'] if 'message' in response['choices'][0] else response['choices'][0]['messages'][-1]
         # llm_output += f"\n{employee_name}:\n{assistant_output['content']}"
@@ -203,7 +237,7 @@ def work(employee_name, callback=None):
         except Exception as e:
             logging.error(f"Error: {e}")
     pattern = re.compile(r'<talk goal="([^"]+)">(.*?)</talk>', re.IGNORECASE | re.DOTALL)
-    matches = re.findall(pattern, assistant_output['content'])
+    matches = re.findall(pattern, assistant_output['content'] or '')
     
     if not matches:
         employee['lock'].release()
@@ -278,7 +312,7 @@ while True:
         employee_dict[config.ceo_name]['memory'].append({"role": "user", "content": "All employees have terminated. Please review 'plan.json' files by read_file and see if there is anything unfinished(like a 'XXX' placeholder, or missing a required field), or needs further improvements(check the budget!). In that case, please talk to your employees. Make sure the project is completely finished and ready to release, and then you may output 'TERMINATE' to end the project."})
         employee_dict[config.ceo_name]['pending'] = True
         work(config.ceo_name)
-        if "TERMINATE" in employee_dict[config.ceo_name]['memory'][-1]['content']:
+        if "TERMINATE" in (employee_dict[config.ceo_name]['memory'][-1]['content'] or ''):
             break
     for thread in threads:
         thread.join()
